@@ -1,0 +1,17 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Demo: publik dapat membaca employees berdasarkan NIK dan menulis attendance.
+    // Untuk produksi WAJIB tambahkan Firebase Authentication + custom claims/admin roles.
+    match /employees/{id} {
+      allow read: if true;
+      allow create: if true;
+      allow update, delete: if false;
+    }
+    match /attendance/{id} {
+      allow create: if true;
+      allow read: if true;
+      allow update, delete: if false;
+    }
+  }
+}

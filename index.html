@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Absensi | PT PLN (Persero) UIP3B Sumatera</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
+<style>
+body{font-family:Inter,system-ui,sans-serif;background:#f5f7fb}
+video{transform:scaleX(-1)} .glass{backdrop-filter:blur(12px);background:rgba(255,255,255,.9)}
+</style>
+</head>
+<body class="min-h-screen">
+<header class="bg-[#0b3b78] text-white">
+  <div class="max-w-6xl mx-auto px-5 py-4 flex items-center gap-3">
+    <div class="w-11 h-11 rounded-xl bg-white flex items-center justify-center font-black text-[#0b3b78]">PLN</div>
+    <div><div class="font-bold">PT PLN (Persero)</div><div class="text-sm opacity-90">UIP3B Sumatera · Sistem Absensi</div></div>
+  </div>
+</header>
+<main class="max-w-6xl mx-auto px-5 py-8 grid lg:grid-cols-[1.15fr_.85fr] gap-6">
+<section class="glass rounded-3xl shadow p-6">
+ <div class="flex justify-between gap-4 mb-5"><div><h1 class="text-2xl font-bold text-slate-900">Absensi Karyawan</h1><p class="text-slate-500">Verifikasi wajah + waktu otomatis</p></div><a href="admin.html" class="text-sm font-semibold text-[#0b3b78]">Admin →</a></div>
+ <div class="grid sm:grid-cols-2 gap-4">
+  <input id="nik" class="border rounded-xl px-4 py-3" placeholder="NIK / ID Pegawai">
+  <input id="nama" class="border rounded-xl px-4 py-3" placeholder="Nama lengkap">
+ </div>
+ <div class="mt-4 relative overflow-hidden rounded-2xl bg-slate-900 aspect-video">
+  <video id="video" autoplay muted playsinline class="w-full h-full object-cover"></video>
+  <canvas id="overlay" class="absolute inset-0 w-full h-full"></canvas>
+  <div id="camStatus" class="absolute bottom-3 left-3 bg-black/60 text-white rounded-lg px-3 py-2 text-sm">Kamera belum aktif</div>
+ </div>
+ <div class="flex flex-wrap gap-3 mt-4">
+  <button id="start" class="rounded-xl bg-[#0b3b78] text-white px-5 py-3 font-semibold">Aktifkan Kamera</button>
+  <button id="checkIn" disabled class="rounded-xl bg-emerald-600 disabled:bg-slate-300 text-white px-5 py-3 font-semibold">Absen Masuk</button>
+  <button id="checkOut" disabled class="rounded-xl bg-amber-500 disabled:bg-slate-300 text-white px-5 py-3 font-semibold">Absen Pulang</button>
+ </div>
+ <p id="result" class="mt-4 text-sm"></p>
+</section>
+<aside class="space-y-4">
+ <div class="bg-white rounded-3xl shadow p-6"><p class="text-sm text-slate-500">Waktu server</p><div id="clock" class="text-3xl font-black text-[#0b3b78] mt-1">--:--:--</div><p id="date" class="text-slate-500 mt-1"></p></div>
+ <div class="bg-white rounded-3xl shadow p-6"><h2 class="font-bold mb-3">Cara absen</h2><ol class="text-sm text-slate-600 space-y-2 list-decimal pl-5"><li>Masukkan NIK dan nama.</li><li>Aktifkan kamera dan posisikan wajah di tengah.</li><li>Pilih Absen Masuk/Pulang.</li><li>Sistem menyimpan waktu dan hasil verifikasi otomatis.</li></ol></div>
+ <div class="bg-amber-50 border border-amber-200 rounded-2xl p-4 text-sm text-amber-900"><b>Catatan:</b> verifikasi wajah di browser perlu data wajah karyawan yang sudah didaftarkan admin. Sistem contoh ini memakai face descriptor; untuk produksi gunakan liveness/anti-spoofing dan kebijakan perlindungan data perusahaan.</div>
+</aside>
+</main>
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/12.3.0/firebase-app.js";
+import { getFirestore, collection, query, where, getDocs, addDoc, serverTimestamp, limit } from "https://www.gstatic.com/firebasejs/12.3.0/firebase-firestore.js";
+import { firebaseConfig } from "./firebase-config.js";
+const app=initializeApp(firebaseConfig); const db=getFirestore(app);
+const $=id=>document.getElementById(id); let stream=null, modelsReady=false, employee=null;
+
+function tick(){const d=new Date();$("clock").textContent=d.toLocaleTimeString("id-ID");$("date").textContent=d.toLocaleDateString("id-ID",{weekday:"long",year:"numeric",month:"long",day:"numeric"});}
+setInterval(tick,1000); tick();
+
+async function loadModels(){
+ $("camStatus").textContent="Memuat model wajah…";
+ const base="https://cdn.jsdelivr.net/npm/@vladmandic/face-api/model/";
+ await faceapi.nets.tinyFaceDetector.loadFromUri(base);
+ await faceapi.nets.faceLandmark68Net.loadFromUri(base);
+ await faceapi.nets.faceRecognitionNet.loadFromUri(base);
+ modelsReady=true;
+}
+$("start").onclick=async()=>{
+ try{
+  if(!modelsReady) await loadModels();
+  stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:"user",width:{ideal:640},height:{ideal:480}},audio:false});
+  $("video").srcObject=stream; $("camStatus").textContent="Kamera aktif — posisikan wajah di tengah";
+  $("checkIn").disabled=$("checkOut").disabled=false;
+ }catch(e){$("result").textContent="Kamera gagal diakses. Pastikan izin kamera diberikan dan situs menggunakan HTTPS.";}
+};
+async function verify(){
+ if(!modelsReady||!stream){throw Error("Aktifkan kamera terlebih dahulu.");}
+ const nik=$("nik").value.trim(), nama=$("nama").value.trim();
+ if(!nik||!nama) throw Error("NIK dan nama wajib diisi.");
+ const det=await faceapi.detectSingleFace($("video"),new faceapi.TinyFaceDetectorOptions({inputSize:320,scoreThreshold:.55})).withFaceLandmarks().withFaceDescriptor();
+ if(!det) throw Error("Wajah tidak terdeteksi. Hadapkan wajah ke kamera.");
+ const q=query(collection(db,"employees"),where("nik","==",nik),limit(1)), snap=await getDocs(q);
+ if(snap.empty) throw Error("NIK belum terdaftar. Hubungi admin.");
+ employee={id:snap.docs[0].id,...snap.docs[0].data()};
+ const saved=new Float32Array(employee.faceDescriptor);
+ const distance=faceapi.euclideanDistance(det.descriptor,saved);
+ if(distance>0.48) throw Error("Verifikasi wajah gagal. Silakan coba lagi.");
+ return {distance,employee};
+}
+async function submit(type){
+ $("checkIn").disabled=$("checkOut").disabled=true; $("result").textContent="Memverifikasi wajah…";
+ try{
+  const {distance,employee}=await verify();
+  const now=new Date();
+  await addDoc(collection(db,"attendance"),{
+   nik:employee.nik,nama:employee.nama||$("nama").value.trim(),type,
+   verified:true,faceDistance:Number(distance.toFixed(4)),clientTime:now.toISOString(),createdAt:serverTimestamp()
+  });
+  $("result").textContent=`✓ ${type==="masuk"?"Absen masuk":"Absen pulang"} berhasil. Wajah cocok (${distance.toFixed(3)}).`;
+ }catch(e){$("result").textContent="✕ "+e.message;}
+ finally{$("checkIn").disabled=$("checkOut").disabled=false;}
+}
+$("checkIn").onclick=()=>submit("masuk"); $("checkOut").onclick=()=>submit("pulang");
+</script>
+</body></html>
